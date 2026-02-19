@@ -1,0 +1,2606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FraudLens — Transaction Intelligence</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+  <link  href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet"/>
+
+  <!-- PapaParse for robust CSV parsing (handles quotes, commas inside fields, BOM, etc.) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       DESIGN TOKENS — Dark Fintech Theme
+       Dark blue-to-black gradient with glassmorphism cards
+    ═══════════════════════════════════════════════════════════════════ */
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      /* Background & surfaces */
+      --bg-start:       #000814;
+      --bg-end:         #001233;
+      --glass-bg:       rgba(255, 255, 255, 0.04);
+      --glass-border:   rgba(255, 255, 255, 0.08);
+      --glass-shadow:   0 8px 32px rgba(0, 0, 0, 0.5);
+
+      /* Accent colors */
+      --accent:         #00d4ff;
+      --accent-dim:     rgba(0, 212, 255, 0.1);
+      --accent-glow:    rgba(0, 212, 255, 0.3);
+
+      /* Risk colors */
+      --low:            #10b981;    /* Green - Low Risk */
+      --low-dim:        rgba(16, 185, 129, 0.12);
+      --med:            #f59e0b;    /* Yellow - Medium Risk */
+      --med-dim:        rgba(245, 158, 11, 0.12);
+      --high:           #ef4444;    /* Red - High Risk */
+      --high-dim:       rgba(239, 68, 68, 0.12);
+
+      /* Status colors */
+      --warn:           #f59e0b;
+      --warn-dim:       rgba(245,158,11,0.12);
+      --error:          #ef4444;
+      --error-dim:      rgba(239,68,68,0.12);
+      --info:           #38bdf8;
+      --info-dim:       rgba(56,189,248,0.12);
+
+      /* Text */
+      --text:           #e2e8f0;
+      --muted:          #64748b;
+      --muted-light:    #94a3b8;
+
+      /* Border */
+      --border:         rgba(255,255,255,0.07);
+
+      /* Transitions */
+      --transition:     all 0.3s ease;
+
+      /* Table rows */
+      --row-odd:        rgba(255,255,255,0.015);
+      --row-even:       rgba(255,255,255,0.03);
+    }
+
+    /* ── Base ── */
+    body {
+      font-family: 'Poppins', sans-serif;
+      /* Dark blue-to-black gradient background */
+      background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 50%, #000510 100%);
+      background-attachment: fixed;
+      color: var(--text);
+      min-height: 100vh;
+      padding: 48px 20px 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* Animated grid overlay for depth */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Ambient orbs for atmosphere */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -200px;
+      left: -200px;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 212, 255, 0.05) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      width: 100%;
+      max-width: 1020px;
+      z-index: 1;
+    }
+
+    /* ══════════════════════════════════════════════
+       GLASSMORPHISM CARD BASE
+    ══════════════════════════════════════════════ */
+    .glass-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      box-shadow: var(--glass-shadow);
+      transition: var(--transition);
+    }
+    .glass-card:hover {
+      border-color: rgba(0, 212, 255, 0.15);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 212, 255, 0.05);
+      transform: translateY(-2px);
+    }
+
+    /* ══════════════════════════════════════════════
+       HEADER
+    ══════════════════════════════════════════════ */
+    header {
+      margin-bottom: 40px;
+      animation: fadeDown 0.7s ease both;
+    }
+
+    .header-inner {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid rgba(0, 212, 255, 0.2);
+      padding: 5px 14px;
+      border-radius: 20px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+    .tag::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s infinite;
+    }
+
+    h1 {
+      font-size: clamp(30px, 5vw, 52px);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #ffffff 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 300;
+      line-height: 1.6;
+      max-width: 580px;
+    }
+
+    /* ══════════════════════════════════════════════
+       LOADING SPINNER OVERLAY
+    ══════════════════════════════════════════════ */
+    #loadingOverlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 8, 20, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 24px;
+    }
+    #loadingOverlay.visible {
+      display: flex;
+      animation: fadeIn 0.3s ease;
+    }
+
+    /* Spinner ring */
+    .spinner {
+      width: 60px;
+      height: 60px;
+      border: 3px solid rgba(0, 212, 255, 0.15);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .spinner-inner {
+      position: absolute;
+      width: 44px;
+      height: 44px;
+      border: 2px solid rgba(0, 212, 255, 0.08);
+      border-bottom-color: rgba(0, 212, 255, 0.5);
+      border-radius: 50%;
+      animation: spin 1.2s linear infinite reverse;
+    }
+    .spinner-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loading-text {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+    .loading-subtext {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      animation: blink 1.4s ease infinite;
+    }
+
+    /* ══════════════════════════════════════════════
+       UPLOAD ZONE
+    ══════════════════════════════════════════════ */
+    .upload-zone {
+      position: relative;
+      border: 2px dashed rgba(0, 212, 255, 0.2);
+      border-radius: 24px;
+      padding: 60px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: var(--transition);
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      margin-bottom: 28px;
+      animation: fadeUp 0.6s 0.15s ease both;
+      overflow: hidden;
+    }
+    /* Inner glow on hover */
+    .upload-zone::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,212,255,0.06) 0%, transparent 70%);
+      opacity: 0;
+      transition: var(--transition);
+      border-radius: 24px;
+    }
+    .upload-zone:hover::before,
+    .upload-zone.drag-over::before {
+      opacity: 1;
+    }
+    .upload-zone:hover,
+    .upload-zone.drag-over {
+      border-color: var(--accent);
+      box-shadow: 0 0 40px rgba(0, 212, 255, 0.15), inset 0 0 40px rgba(0, 212, 255, 0.03);
+    }
+    .upload-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .upload-icon {
+      font-size: 52px;
+      margin-bottom: 16px;
+      display: block;
+      filter: drop-shadow(0 0 12px rgba(0,212,255,0.3));
+      animation: float 3s ease-in-out infinite;
+    }
+    .upload-zone h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .upload-zone p {
+      font-size: 13px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .upload-formats {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+    .format-badge {
+      font-size: 11px;
+      font-family: 'DM Mono', monospace;
+      padding: 3px 10px;
+      border-radius: 12px;
+      background: rgba(0,212,255,0.08);
+      border: 1px solid rgba(0,212,255,0.15);
+      color: var(--accent);
+    }
+
+    /* ══════════════════════════════════════════════
+       ERROR MESSAGE
+    ══════════════════════════════════════════════ */
+    .error-msg {
+      display: none;
+      background: var(--error-dim);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--error);
+      border-radius: 14px;
+      padding: 14px 20px;
+      font-size: 13px;
+      font-family: 'DM Mono', monospace;
+      margin-bottom: 24px;
+      backdrop-filter: blur(8px);
+    }
+    .error-msg.visible {
+      display: block;
+      animation: shake 0.4s ease;
+    }
+
+    /* ══════════════════════════════════════════════
+       ACTION ROW (reset + download)
+    ══════════════════════════════════════════════ */
+    .action-row {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+      animation: fadeUp 0.4s ease both;
+    }
+    .action-row.visible { display: flex; }
+
+    .reset-btn {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.25);
+      color: var(--error);
+      padding: 10px 22px;
+      border-radius: 12px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .reset-btn:hover {
+      background: rgba(239,68,68,0.18);
+      border-color: var(--error);
+      box-shadow: 0 0 20px rgba(239,68,68,0.2);
+      transform: translateY(-1px);
+    }
+
+    .download-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(0,212,255,0.05));
+      border: 1px solid rgba(0,212,255,0.35);
+      color: var(--accent);
+      padding: 10px 22px;
+      border-radius: 12px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .download-btn:hover {
+      background: linear-gradient(135deg, rgba(0,212,255,0.25), rgba(0,212,255,0.1));
+      border-color: var(--accent);
+      box-shadow: 0 0 24px rgba(0,212,255,0.3);
+      transform: translateY(-2px);
+    }
+    .download-btn:active { transform: translateY(0); }
+
+    /* ══════════════════════════════════════════════
+       DASHBOARD SUMMARY CARDS (NEW)
+       Total Accounts / Fraud Rings / Suspicious / Time
+    ══════════════════════════════════════════════ */
+    .dashboard-grid {
+      display: none;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+      animation: fadeUp 0.5s ease both;
+    }
+    .dashboard-grid.visible { display: grid; }
+
+    .dash-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 24px 22px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+    .dash-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      border-radius: 20px 20px 0 0;
+      background: linear-gradient(90deg, transparent, var(--card-color, var(--accent)), transparent);
+      opacity: 0.5;
+    }
+    .dash-card:hover {
+      border-color: rgba(255,255,255,0.12);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+      transform: translateY(-3px);
+    }
+
+    .dash-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .dash-content { flex: 1; min-width: 0; }
+    .dash-label {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-family: 'DM Mono', monospace;
+    }
+    .dash-value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+    .dash-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* Color variants */
+    .dash-card.blue  { --card-color: var(--accent); }
+    .dash-card.blue  .dash-value { color: var(--accent); }
+    .dash-card.red   { --card-color: var(--high); }
+    .dash-card.red   .dash-value { color: var(--high); }
+    .dash-card.yellow{ --card-color: var(--med); }
+    .dash-card.yellow .dash-value { color: var(--med); }
+    .dash-card.green { --card-color: var(--low); }
+    .dash-card.green  .dash-value { color: var(--low); }
+
+    /* ══════════════════════════════════════════════
+       OLD STATS BAR (hidden, kept for JS compatibility)
+    ══════════════════════════════════════════════ */
+    .stats-row {
+      display: none !important; /* replaced by dashboard-grid */
+    }
+
+    /* ══════════════════════════════════════════════
+       SHARED TABLE STYLES
+    ══════════════════════════════════════════════ */
+    .table-wrapper {
+      display: none;
+      overflow-x: auto;
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      animation: fadeUp 0.5s ease both;
+      margin-bottom: 32px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+    }
+    .table-wrapper.visible { display: block; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead {
+      position: sticky;
+      top: 0;
+      background: rgba(0, 8, 20, 0.8);
+      backdrop-filter: blur(12px);
+    }
+    thead th {
+      padding: 15px 18px;
+      text-align: left;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    thead th:first-child { color: var(--accent); }
+
+    tbody tr {
+      transition: background 0.2s ease;
+    }
+    /* Alternating row colors */
+    tbody tr:nth-child(odd)  { background: var(--row-odd); }
+    tbody tr:nth-child(even) { background: var(--row-even); }
+    /* Hover highlight */
+    tbody tr:hover { background: rgba(0, 212, 255, 0.06); }
+
+    tbody td {
+      padding: 13px 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      font-family: 'DM Mono', monospace;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    td.amount   { color: var(--accent); font-weight: 500; }
+    td.id-cell  { color: var(--muted); font-size: 12px; }
+
+    /* Rounded table edges */
+    table tbody tr:last-child td:first-child { border-bottom-left-radius: 20px; }
+    table tbody tr:last-child td:last-child  { border-bottom-right-radius: 20px; }
+    table tbody tr:last-child td             { border-bottom: none; }
+
+    /* ══════════════════════════════════════════════
+       RISK LEVEL BADGES — color coded
+    ══════════════════════════════════════════════ */
+    .risk-high {
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--high); font-weight: 700;
+    }
+    .risk-high::before { content: '🔴'; font-size: 10px; }
+
+    .risk-med {
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--med); font-weight: 700;
+    }
+    .risk-med::before { content: '🟡'; font-size: 10px; }
+
+    .risk-low {
+      display: inline-flex; align-items: center; gap: 5px;
+      color: var(--low); font-weight: 700;
+    }
+    .risk-low::before { content: '🟢'; font-size: 10px; }
+
+    /* Backward-compat aliases */
+    .score-hi  { color: var(--high); font-weight: 700; }
+    .score-med { color: var(--med);  font-weight: 700; }
+    .score-lo  { color: var(--low);  font-weight: 700; }
+
+    /* ══════════════════════════════════════════════
+       SECTION STRUCTURE
+    ══════════════════════════════════════════════ */
+    .section {
+      display: none;
+      animation: fadeUp 0.6s ease both;
+      margin-bottom: 32px;
+    }
+    .section.visible { display: block; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .section-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+    }
+    .section-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      color: var(--info);
+      background: var(--info-dim);
+      border: 1px solid rgba(56,189,248,0.25);
+      padding: 4px 11px;
+      border-radius: 20px;
+    }
+
+    /* ══════════════════════════════════════════════
+       GRAPH SECTION
+    ══════════════════════════════════════════════ */
+    /* Graph toggle button row */
+    .graph-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .toggle-btn {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 18px;
+      border-radius: 10px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid var(--glass-border);
+      background: rgba(255,255,255,0.04);
+      color: var(--muted-light);
+      transition: var(--transition);
+    }
+    .toggle-btn:hover {
+      border-color: rgba(0,212,255,0.3);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .toggle-btn.active {
+      background: linear-gradient(135deg, rgba(0,212,255,0.18), rgba(0,212,255,0.06));
+      border-color: rgba(0,212,255,0.5);
+      color: var(--accent);
+      box-shadow: 0 0 16px rgba(0,212,255,0.15);
+    }
+
+    #graphContainer {
+      width: 100%;
+      height: 520px;
+      background: rgba(0, 5, 15, 0.6);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      overflow: hidden;
+      position: relative;
+      backdrop-filter: blur(12px);
+    }
+
+    /* Heatmap overlay (shown in heatmap mode) */
+    #heatmapOverlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg,
+        rgba(239,68,68,0.06) 0%,
+        rgba(245,158,11,0.04) 50%,
+        rgba(16,185,129,0.03) 100%);
+      pointer-events: none;
+      z-index: 5;
+      border-radius: 20px;
+    }
+    #heatmapOverlay.visible { display: block; }
+
+    /* ── Node info panel (floating, inside graph) ── */
+    #nodePanel {
+      display: none;
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 270px;
+      background: rgba(0, 8, 20, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(0, 212, 255, 0.35);
+      border-radius: 18px;
+      padding: 20px 22px;
+      z-index: 10;
+      box-shadow: 0 0 40px rgba(0, 212, 255, 0.15), 0 20px 60px rgba(0,0,0,0.7);
+      animation: fadeUp 0.3s ease both;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+    #nodePanel.visible { display: block; }
+
+    #nodePanelClose {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--glass-border);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+    }
+    #nodePanelClose:hover { background: var(--error-dim); color: var(--error); border-color: var(--error); }
+
+    #nodeName {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      font-family: 'DM Mono', monospace;
+      margin-bottom: 16px;
+      padding-right: 30px;
+      word-break: break-all;
+    }
+    .node-stat { margin-bottom: 12px; }
+    .node-stat-label {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      margin-bottom: 4px;
+    }
+    .node-stat-value { font-size: 15px; font-weight: 600; font-family: 'DM Mono', monospace; }
+    .out-val { color: var(--med); }
+    .in-val  { color: var(--low); }
+    .net-val-pos { color: var(--info); }
+    .net-val-neg { color: var(--high); }
+    .node-divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+    /* Score bar */
+    .score-bar-wrap {
+      margin-top: 8px;
+      height: 6px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .score-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    /* Ring membership pills */
+    .ring-pill {
+      display: inline-block;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      padding: 3px 10px;
+      border-radius: 12px;
+      margin: 2px 2px 0 0;
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.35);
+      color: var(--high);
+    }
+    #npRings { margin-top: 6px; line-height: 1.8; }
+
+    /* Temporal anomaly flags */
+    .flag-pill {
+      display: inline-block;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      padding: 3px 10px;
+      border-radius: 12px;
+      margin: 2px 2px 0 0;
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.35);
+      color: var(--med);
+    }
+    #npFlags { margin-top: 6px; line-height: 1.8; }
+
+    /* ── Graph legend ── */
+    .graph-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 14px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+    .legend-item  { display: flex; align-items: center; gap: 8px; }
+    .legend-dot   { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .graph-hint   {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 10px;
+      opacity: 0.7;
+    }
+
+    /* ══════════════════════════════════════════════
+       RING TABLE — styled with alternating colors
+    ══════════════════════════════════════════════ */
+    .ring-summary { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; }
+    .ring-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+    .ring-badge.found {
+      color: var(--high);
+      background: var(--high-dim);
+      border: 1px solid rgba(239,68,68,0.35);
+      box-shadow: 0 0 16px rgba(239,68,68,0.15);
+    }
+    .ring-badge.none {
+      color: var(--low);
+      background: var(--low-dim);
+      border: 1px solid rgba(16,185,129,0.25);
+    }
+    .ring-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+    }
+    .ring-table-wrap table thead th:first-child { color: var(--high); }
+
+    /* ══════════════════════════════════════════════
+       ANOMALY BADGES
+    ══════════════════════════════════════════════ */
+    .anomaly-flag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      background: var(--warn-dim);
+      border: 1px solid rgba(245,158,11,0.3);
+      color: var(--warn);
+      margin-right: 8px;
+      margin-bottom: 8px;
+      transition: var(--transition);
+    }
+    .anomaly-flag:hover {
+      border-color: var(--warn);
+      box-shadow: 0 0 12px rgba(245,158,11,0.2);
+    }
+
+    /* ══════════════════════════════════════════════
+       NETWORK SUMMARY CARDS
+    ══════════════════════════════════════════════ */
+    .net-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .net-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 18px 20px;
+      transition: var(--transition);
+    }
+    .net-card:hover {
+      border-color: rgba(0,212,255,0.15);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .stat-label {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
+
+    /* ══════════════════════════════════════════════
+       MODEL EXPLANATION
+    ══════════════════════════════════════════════ */
+    .explain-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media(max-width: 640px) { .explain-grid { grid-template-columns: 1fr; } }
+
+    .explain-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 22px 24px;
+      transition: var(--transition);
+    }
+    .explain-card:hover {
+      border-color: rgba(0,212,255,0.12);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .explain-card h3 { font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 14px; }
+    .explain-card p  { font-size: 12px; color: var(--muted); line-height: 1.8; font-family: 'DM Mono', monospace; }
+
+    .explain-signal { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+    .signal-weight  {
+      flex-shrink: 0;
+      width: 42px;
+      text-align: right;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 600;
+      padding: 2px 0;
+    }
+    .signal-desc { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; line-height: 1.7; }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+      margin-top: 16px;
+      opacity: 0.6;
+      text-align: center;
+    }
+
+    /* ══════════════════════════════════════════════
+       SCROLLBAR STYLING
+    ══════════════════════════════════════════════ */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.25); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.45); }
+
+    /* ══════════════════════════════════════════════
+       ANIMATIONS
+    ══════════════════════════════════════════════ */
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60%  { transform: translateX(-6px); }
+      40%, 80%  { transform: translateX(6px); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 0.7; }
+      50%       { opacity: 0.3; }
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-8px); }
+    }
+
+    /* ══════════════════════════════════════════════
+       RESPONSIVE
+    ══════════════════════════════════════════════ */
+    @media (max-width: 640px) {
+      body { padding: 28px 14px 60px; }
+      .dashboard-grid { grid-template-columns: 1fr 1fr; }
+      #graphContainer { height: 380px; }
+      #nodePanel { width: calc(100% - 32px); top: auto; bottom: 16px; right: 16px; max-height: 280px; }
+      h1 { font-size: 32px; }
+    }
+    @media (max-width: 400px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════
+     LOADING SPINNER OVERLAY
+══════════════════════════════════════════════ -->
+<div id="loadingOverlay">
+  <div class="spinner-wrap">
+    <div class="spinner"></div>
+    <div class="spinner-inner"></div>
+  </div>
+  <div class="loading-text">Analyzing Transactions...</div>
+  <div class="loading-subtext">Running SCC detection · temporal analysis · risk scoring</div>
+</div>
+
+<div class="container">
+
+  <!-- ══════ HEADER ══════ -->
+  <header>
+    <div class="header-inner">
+      <div>
+        <div class="tag">FRAUD INTELLIGENCE</div>
+        <h1>FraudLens</h1>
+        <p class="subtitle">Upload your transaction CSV for instant SCC ring detection, temporal anomaly analysis, and composite risk scoring. Export results as JSON.</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════ UPLOAD ZONE ══════ -->
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept=".csv"/>
+    <span class="upload-icon">📂</span>
+    <h2>Drop your CSV file here</h2>
+    <p>or click to browse — .csv files only</p>
+    <div class="upload-formats">
+      <span class="format-badge">transaction_id</span>
+      <span class="format-badge">sender_id</span>
+      <span class="format-badge">receiver_id</span>
+      <span class="format-badge">amount</span>
+      <span class="format-badge">timestamp</span>
+    </div>
+  </div>
+
+  <!-- ══════ ERROR MESSAGE ══════ -->
+  <div class="error-msg" id="errorMsg">⚠ &nbsp;<span id="errorText"></span></div>
+
+  <!-- ══════ ACTION ROW ══════ -->
+  <div class="action-row" id="actionRow">
+    <button class="reset-btn" onclick="resetAll()">✕ &nbsp;Clear &amp; Upload New File</button>
+    <button class="download-btn" onclick="downloadJSON()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Download fraud_report.json
+    </button>
+  </div>
+
+  <!-- ══════ DASHBOARD SUMMARY CARDS (NEW) ══════ -->
+  <div class="dashboard-grid" id="dashboardGrid">
+    <!-- Total Accounts -->
+    <div class="dash-card blue">
+      <div class="dash-icon">🏦</div>
+      <div class="dash-content">
+        <div class="dash-label">Total Accounts</div>
+        <div class="dash-value" id="dashAccounts">0</div>
+        <div class="dash-sub" id="dashTxns">0 transactions</div>
+      </div>
+    </div>
+    <!-- Fraud Rings -->
+    <div class="dash-card red">
+      <div class="dash-icon">🔴</div>
+      <div class="dash-content">
+        <div class="dash-label">Fraud Rings</div>
+        <div class="dash-value" id="dashRings">0</div>
+        <div class="dash-sub">SCC ≥ 3 members</div>
+      </div>
+    </div>
+    <!-- Suspicious Accounts -->
+    <div class="dash-card yellow">
+      <div class="dash-icon">⚠️</div>
+      <div class="dash-content">
+        <div class="dash-label">Suspicious</div>
+        <div class="dash-value" id="dashSuspicious">0</div>
+        <div class="dash-sub" id="dashHighRisk">0 high risk</div>
+      </div>
+    </div>
+    <!-- Processing Time -->
+    <div class="dash-card green">
+      <div class="dash-icon">⚡</div>
+      <div class="dash-content">
+        <div class="dash-label">Processing Time</div>
+        <div class="dash-value" id="dashTime">—</div>
+        <div class="dash-sub">full pipeline</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ ORIGINAL STATS ROW (hidden, kept for JS compat) ══════ -->
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card"><div class="stat-label">Transactions</div><div class="stat-value" id="statCount">0</div></div>
+    <div class="stat-card"><div class="stat-label">Total Volume</div><div class="stat-value" id="statTotal">$0</div></div>
+    <div class="stat-card"><div class="stat-label">Accounts</div><div class="stat-value" id="statAccounts">0</div></div>
+    <div class="stat-card"><div class="stat-label">Fraud Rings</div><div class="stat-value" id="statRings" style="color:var(--high)">0</div></div>
+    <div class="stat-card"><div class="stat-label">High Risk</div><div class="stat-value" id="statHigh" style="color:var(--high)">0</div></div>
+  </div>
+
+  <!-- ══════ TRANSACTION TABLE ══════ -->
+  <div class="table-wrapper" id="tableWrapper">
+    <table>
+      <thead><tr>
+        <th>#</th><th>Transaction ID</th><th>Sender</th>
+        <th>Receiver</th><th>Amount</th><th>Timestamp</th>
+      </tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <!-- ══════ GRAPH ══════ -->
+  <div class="section" id="graphSection">
+    <div class="section-header">
+      <span class="section-title">Transaction Graph</span>
+      <span class="section-tag">SCC · DIRECTED · INTERACTIVE</span>
+    </div>
+
+    <!-- Graph mode toggle buttons -->
+    <div class="graph-controls">
+      <button class="toggle-btn active" id="btnNormal" onclick="setGraphMode('normal')">
+        📊 Normal Graph Mode
+      </button>
+      <!-- <button class="toggle-btn" id="btnHeatmap" onclick="setGraphMode('heatmap')">
+        🌡️ Risk Heatmap Mode
+      </button> -->
+    </div>
+
+    <div id="graphContainer">
+      <!-- Heatmap gradient overlay (Risk Heatmap Mode) -->
+
+      <!-- Floating node detail panel -->
+      <div id="nodePanel">
+        <button id="nodePanelClose" onclick="closePanel()">✕</button>
+        <div id="nodeName">—</div>
+
+        <!-- Risk score with bar -->
+        <div class="node-stat">
+          <div class="node-stat-label">⚠ Composite Risk Score</div>
+          <div class="node-stat-value" id="npScore">—</div>
+          <div class="score-bar-wrap"><div class="score-bar-fill" id="npScoreBar" style="width:0%"></div></div>
+        </div>
+        <hr class="node-divider"/>
+
+        <div class="node-stat">
+          <div class="node-stat-label">⬆ Sent</div>
+          <div class="node-stat-value out-val" id="npOut">—</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px" id="npOutCount">—</div>
+        </div>
+        <div class="node-stat">
+          <div class="node-stat-label">⬇ Received</div>
+          <div class="node-stat-value in-val" id="npIn">—</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px" id="npInCount">—</div>
+        </div>
+        <div class="node-stat">
+          <div class="node-stat-label">Net Flow</div>
+          <div class="node-stat-value" id="npNet">—</div>
+        </div>
+        <hr class="node-divider"/>
+        <div class="node-stat">
+          <div class="node-stat-label">Graph Centrality</div>
+          <div style="font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;line-height:1.8" id="npCentrality">—</div>
+        </div>
+        <hr class="node-divider"/>
+        <div id="npRingRow" style="display:none">
+          <div class="node-stat-label">🔴 Fraud Ring(s)</div>
+          <div id="npRings"></div>
+          <div style="margin-top:10px"></div>
+        </div>
+        <div id="npFlagRow" style="display:none">
+          <div class="node-stat-label">⚡ Temporal Flags</div>
+          <div id="npFlags"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="graph-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#10b981;box-shadow:0 0 6px #10b98199"></div><span>Low Risk (Normal)</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444;box-shadow:0 0 6px #ef444499"></div><span>High Risk (Fraud Ring)</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;box-shadow:0 0 6px #f59e0b66"></div><span>Medium Risk (Temporal Anomaly)</span></div>
+    </div>
+    <p class="graph-hint">💡 Click node for full risk breakdown &nbsp;·&nbsp; Drag to rearrange &nbsp;·&nbsp; Scroll to zoom</p>
+  </div>
+
+  <!-- ══════ FRAUD RINGS ══════ -->
+  <div class="section" id="ringSection">
+    <div class="section-header">
+      <span class="section-title">Fraud Ring Detection</span>
+      <span class="section-tag">TARJAN SCC · SIZE ≥ 3</span>
+    </div>
+    <div class="ring-summary">
+      <span id="ringBadge" class="ring-badge">—</span>
+      <span style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted)" id="ringSubtitle"></span>
+    </div>
+    <div class="ring-table-wrap" id="ringTableWrap" style="display:none">
+      <table>
+        <thead><tr>
+          <th>Ring ID</th><th>Size</th><th>Members</th>
+          <th>Volume Cycled</th><th>Txn Count</th><th>Temporal Flags</th>
+        </tr></thead>
+        <tbody id="ringTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════ TEMPORAL ANOMALIES ══════ -->
+  <div class="section" id="anomalySection">
+    <div class="section-header">
+      <span class="section-title">Temporal Anomaly Detection</span>
+      <span class="section-tag">BURST · RAPID CYCLE · AMOUNT LOOP</span>
+    </div>
+    <div id="anomalyBadges" style="margin-bottom:16px"></div>
+    <div class="table-wrapper" id="anomalyTableWrapper" style="display:block;margin-bottom:0">
+      <table>
+        <thead><tr>
+          <th>Account</th><th>Flag Type</th><th>Detail</th><th>Risk Contribution</th>
+        </tr></thead>
+        <tbody id="anomalyTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════ SUSPICIOUS ACCOUNTS ══════ -->
+  <div class="section" id="accountSection">
+    <div class="section-header">
+      <span class="section-title">Suspicious Account Rankings</span>
+      <span class="section-tag">COMPOSITE RISK SCORE</span>
+    </div>
+    <div class="table-wrapper" id="accountTableWrapper" style="display:block;margin-bottom:0">
+      <table>
+        <thead><tr>
+          <th>Rank</th><th>Account</th><th>Risk Score</th>
+          <th>SCC Ring</th><th>Out-Deg</th><th>In-Deg</th>
+          <th>Centrality</th><th>Vol Z-Score</th><th>Temporal</th>
+        </tr></thead>
+        <tbody id="accountTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════ NETWORK SUMMARY ══════ -->
+  <div class="section" id="networkSection">
+    <div class="section-header">
+      <span class="section-title">Network Summary</span>
+      <span class="section-tag">GRAPH METRICS</span>
+    </div>
+    <div class="net-grid" id="netGrid"></div>
+  </div>
+
+  <!-- ══════ MODEL EXPLANATION ══════ -->
+  <div class="section" id="modelSection">
+    <div class="section-header">
+      <span class="section-title">Model Explanation</span>
+      <span class="section-tag">SCORING FORMULA</span>
+    </div>
+    <div class="explain-grid">
+      <div class="explain-card">
+        <h3>Composite Risk Score Signals</h3>
+        <div class="explain-signal"><span class="signal-weight">30%</span><span class="signal-desc">SCC Fraud Ring Membership — Tarjan's algorithm finds all strongly connected components. Members of SCCs with ≥3 nodes are flagged.</span></div>
+        <div class="explain-signal"><span class="signal-weight">20%</span><span class="signal-desc">Volume Z-Score Anomaly — Amount sent vs. population mean/stddev. Z &gt; 2 triggers high contribution.</span></div>
+        <div class="explain-signal"><span class="signal-weight">15%</span><span class="signal-desc">Betweenness Centrality — Approximated via random-sampled BFS. High betweenness = bridge node in ring structure.</span></div>
+        <div class="explain-signal"><span class="signal-weight">15%</span><span class="signal-desc">Temporal Anomalies — Rapid circular transfer (&lt;30 min), burst activity, identical-amount looping.</span></div>
+        <div class="explain-signal"><span class="signal-weight">10%</span><span class="signal-desc">Fan-Out (Out-Degree Centrality) — Normalized unique receivers. High fan-out = layering behaviour.</span></div>
+        <div class="explain-signal"><span class="signal-weight">10%</span><span class="signal-desc">Fan-In (In-Degree Centrality) — Normalized unique senders. High fan-in = aggregation / smurfing.</span></div>
+      </div>
+      <div class="explain-card">
+        <h3>Algorithm Complexity</h3>
+        <p>
+          <b>Tarjan SCC:</b> O(V + E) — linear in vertices + edges.<br/><br/>
+          <b>Betweenness Centrality:</b> Exact is O(V·E). We approximate via k=min(V,50) sampled BFS runs → O(k·E).<br/><br/>
+          <b>Temporal Anomaly:</b> O(T log T) — sort transactions by time, then sliding-window scan.<br/><br/>
+          <b>Volume Z-Score:</b> O(V) — single pass mean/stddev + per-account lookup.<br/><br/>
+          <b>Graph Build:</b> O(E) — single pass with Map-based adjacency for O(1) lookups, eliminating all O(n²) inner filters.<br/><br/>
+          <b>PapaParse:</b> RFC 4180 compliant. Handles quoted fields, embedded commas, and BOM.<br/><br/>
+          Total pipeline: <b>O((V+E) + k·E + T log T)</b>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <p class="hint" id="hintText">Expected CSV columns: transaction_id, sender_id, receiver_id, amount, timestamp</p>
+</div><!-- /container -->
+
+<script>
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FRAUDLENS v2.0  —  Frontend-Only Financial Crime Detection Engine
+   ═══════════════════════════════════════════════════════════════════════
+
+   PIPELINE:
+     1. PapaParse CSV → validated transaction array
+     2. Build O(E) adjacency structures with Maps
+     3. Tarjan SCC  O(V+E)  → fraud rings (size ≥ 3)
+     4. Temporal anomaly scan  O(T log T)
+     5. Graph metrics: degree, approx betweenness  O(k·E)
+     6. Volume Z-score  O(V)
+     7. Composite risk score (weighted, normalised, 0–100)
+     8. Render graph (vis.js), tables, panels
+     9. Export fraud_report.json
+═══════════════════════════════════════════════════════════════════════ */
+
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DOM REFERENCES  —  queried once, never replaced
+═══════════════════════════════════════════════════════════════════════ */
+
+const DOM = {
+  uploadZone:     document.getElementById('uploadZone'),
+  fileInput:      document.getElementById('fileInput'),
+  errorMsg:       document.getElementById('errorMsg'),
+  errorText:      document.getElementById('errorText'),
+  actionRow:      document.getElementById('actionRow'),
+  statsRow:       document.getElementById('statsRow'),
+  tableWrapper:   document.getElementById('tableWrapper'),
+  tableBody:      document.getElementById('tableBody'),
+  graphSection:   document.getElementById('graphSection'),
+  ringSection:    document.getElementById('ringSection'),
+  anomalySection: document.getElementById('anomalySection'),
+  accountSection: document.getElementById('accountSection'),
+  networkSection: document.getElementById('networkSection'),
+  modelSection:   document.getElementById('modelSection'),
+  hintText:       document.getElementById('hintText'),
+  nodePanel:      document.getElementById('nodePanel'),
+  graphContainer: document.getElementById('graphContainer'),
+};
+
+// Short aliases so the rest of the code is unchanged.
+
+const uploadZone     = DOM.uploadZone;
+const fileInput      = DOM.fileInput;
+const errorMsg       = DOM.errorMsg;
+const errorText      = DOM.errorText;
+const actionRow      = DOM.actionRow;
+const statsRow       = DOM.statsRow;
+const tableWrapper   = DOM.tableWrapper;
+const tableBody      = DOM.tableBody;
+const graphSection   = DOM.graphSection;
+const ringSection    = DOM.ringSection;
+const anomalySection = DOM.anomalySection;
+const accountSection = DOM.accountSection;
+const networkSection = DOM.networkSection;
+const modelSection   = DOM.modelSection;
+const hintText       = DOM.hintText;
+
+/* ═══════════════════════════════════════════════════════════════════════
+   APPLICATION STATE
+═══════════════════════════════════════════════════════════════════════ */
+
+function createFreshState() {
+  return {
+    allTransactions: [],
+    analysisResult:  null,
+    networkInstance: null,
+    visNodeDataset:  null,   // vis.DataSet for nodes — lets setGraphMode update colors w/o rebuild
+    visEdgeDataset:  null,   // vis.DataSet for edges — lets setGraphMode update colors w/o rebuild
+    edgeVolumeMap:   null,   // Map<edgeId, volumeFraction 0-1> — for per-edge heatmap coloring
+    maxEdgeVolume:   1,      // max raw edge volume — used to normalize volume fractions
+    isParsing:       false,
+    processingStart: 0,
+  };
+}
+let AppState = createFreshState();
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESULT SECTIONS
+═══════════════════════════════════════════════════════════════════════ */
+
+
+const RESULT_SECTIONS = [
+  DOM.statsRow,
+  DOM.tableWrapper,
+  DOM.graphSection,
+  DOM.ringSection,
+  DOM.anomalySection,
+  DOM.accountSection,
+  DOM.networkSection,
+  DOM.modelSection,
+  DOM.actionRow,
+];
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GRAPH MODE TOGGLE — HEATMAP ENGINE
+   ─────────────────────────────────────────────────────────────────────
+
+   WHY THE PREVIOUS HEATMAP FAILED (root causes):
+   ────────────────────────────────────────────────
+   1. NO NODE COLOR UPDATES — setGraphMode() only changed a CSS gradient
+      on the container div. vis.js nodes are rendered on an HTML5 canvas,
+      completely unaffected by CSS backgrounds. The nodes never changed color.
+
+   2. EDGE UPDATES IGNORED VOLUME — in heatmap mode edges were all set to
+      a single red color. The original edge `width` (which already encoded
+      volume) was overwritten with no volume-aware value on toggle-back,
+      causing permanent width loss after one cycle.
+
+   3. STALE darkenColor() OUTPUT — multiplying RGB by 0.15 collapsed every
+      color to near-black (e.g. #10b981 → #021712). Nodes were invisible.
+
+   4. NO SCORE NORMALIZATION — raw scores 0–100 were mapped directly, but
+      if all scores cluster in a narrow band (e.g. 60–75), the visual
+      gradient was flat. Relative normalization spreads the palette properly.
+
+   5. NO SAFE FALLBACK — `scoreMap.get(id) || 0` silently treated a missing
+      account as score=0, which is wrong; those nodes looked "safe" even if
+      the score lookup failed for a different reason.
+
+   6. DATASET REFERENCE RACE — resetAll() set AppState.visNodeDataset=null
+      BEFORE calling setGraphMode('normal'). setGraphMode checked the reference
+      but still accessed it via the closed-over `r` — so on a fresh upload
+      after a reset, toggling heatmap operated on the old (destroyed) dataset.
+
+   FIXES APPLIED:
+   ──────────────
+   • riskScoreToColor() uses proper HSL interpolation (perceptually uniform)
+   • Node size uses a normalized band: minSize + (maxSize-minSize)*normalizedScore
+   • Edge color and opacity encode volume fraction (not binary red/default)
+   • Edge width is preserved per-edge and updated correctly on mode switch
+   • AppState stores edgeVolumes map so edge toggle has the data it needs
+   • All defensive guards: null checks on networkInstance AND both datasets
+   • resetAll() sets AppState = createFreshState() THEN calls setGraphMode,
+     so the guard fires cleanly with null datasets (no stale reference issue)
+═══════════════════════════════════════════════════════════════════════ */
+
+let currentGraphMode = 'normal';
+
+/* ──────────────────────────────────────────────────────────────────────
+   COLOR HELPERS
+   All functions are pure (no side-effects) and safe for any input range.
+────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Clamp a number to [min, max].
+ */
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+/**
+ * Parse a #RRGGBB hex string to {r,g,b} (integers 0–255).
+ * Safe: returns {r:0,g:0,b:0} if input is malformed.
+ */
+function hexToRgb(hex) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return { r:0, g:0, b:0 };
+  return { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+}
+
+/**
+ * Convert {r,g,b} to #RRGGBB.
+ */
+function rgbToHex({ r, g, b }) {
+  return '#' + [r, g, b]
+    .map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2,'0'))
+    .join('');
+}
+
+/**
+ * Linearly interpolate between two #RRGGBB colors by factor t ∈ [0,1].
+ * Uses perceptually friendlier sqrt-of-squared-channel blending (avoids
+ * the dark muddy band at 50% that plain linear RGB mixing produces).
+ */
+
+function lerpColor(hex1, hex2, t) {
+  t = clamp(t, 0, 1);
+  const c1 = hexToRgb(hex1);
+  const c2 = hexToRgb(hex2);
+  // Gamma-corrected blend: sqrt((1-t)*c1² + t*c2²)
+  return rgbToHex({
+    r: Math.sqrt((1-t)*c1.r*c1.r + t*c2.r*c2.r),
+    g: Math.sqrt((1-t)*c1.g*c1.g + t*c2.g*c2.g),
+    b: Math.sqrt((1-t)*c1.b*c1.b + t*c2.b*c2.b),
+  });
+}
+
+/**
+ * Map a risk score (0–100) to a border color using a 3-stop gradient:
+ *   0   → #10b981  (emerald green  — safe)
+ *   50  → #f59e0b  (amber yellow   — caution)
+ *   100 → #ef4444  (crimson red    — danger)
+ *
+ * @param {number} score - Raw risk score 0–100 (clamped internally)
+ * @param {number} [normScore] - Optional pre-normalized 0–1 value.
+ *   Pass this when you want relative-to-dataset coloring instead of
+ *   absolute coloring (see buildNormalizedScoreMap).
+ * @returns {string} #RRGGBB hex color
+ */
+function riskScoreToColor(score, normScore) {
+  // Use normalized score if provided, else normalize raw score from 0–100
+  const t = (normScore !== undefined) ? clamp(normScore, 0, 1) : clamp(score, 0, 100) / 100;
+
+  if (t <= 0.5) {
+    // Green → Yellow (first half of the gradient)
+    return lerpColor('#10b981', '#f59e0b', t / 0.5);
+  } else {
+    // Yellow → Red (second half)
+    return lerpColor('#f59e0b', '#ef4444', (t - 0.5) / 0.5);
+  }
+}
+
+/**
+ * Create a dark background tint from a border color.
+ * Instead of multiplying RGB (which collapses to near-black), we blend
+ * the color with a dark base at low opacity — visually much richer.
+ *
+ * @param {string} hex - Border color #RRGGBB
+ * @param {number} [alpha=0.18] - How strongly to tint the dark base (0–1)
+ * @returns {string} #RRGGBB dark tinted color
+ */
+function borderToBg(hex, alpha) {
+  alpha = (alpha === undefined) ? 0.18 : clamp(alpha, 0, 1);
+  const c = hexToRgb(hex);
+  // Blend into a very dark navy base (#050d1a) instead of pure black
+  const base = { r:5, g:13, b:26 };
+  return rgbToHex({
+    r: base.r + (c.r - base.r) * alpha,
+    g: base.g + (c.g - base.g) * alpha,
+    b: base.b + (c.b - base.b) * alpha,
+  });
+}
+
+/**
+ * Build a normalized 0–1 score map from raw 0–100 scores.
+ * Normalization is range-based: maps [minScore, maxScore] → [0, 1].
+ * This spreads the color palette across the ACTUAL score distribution,
+ * so even if all scores are between 60–75, you still get full red/yellow/green.
+ *
+ * Falls back to absolute normalization if all scores are identical.
+ *
+ * @param {Array<{account_id: string, risk_score: number}>} accountScores
+ * @returns {Map<string, number>} accountId → normalized score 0–1
+ */
+function buildNormalizedScoreMap(accountScores) {
+  if (!accountScores || accountScores.length === 0) return new Map();
+
+  const scores = accountScores.map(a => a.risk_score);
+  const minS   = Math.min(...scores);
+  const maxS   = Math.max(...scores);
+  const range  = maxS - minS;
+
+  return new Map(accountScores.map(a => {
+    // If all scores are equal, treat them as mid-range (0.5)
+    const norm = range > 0 ? (a.risk_score - minS) / range : 0.5;
+    return [a.account_id, norm];
+  }));
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   EDGE VOLUME HELPERS
+────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Compute an edge color that encodes its volume fraction (0–1).
+ * Low volume → dim, semi-transparent grey-orange.
+ * High volume → bright, fully opaque crimson-red (in heatmap) or amber (normal).
+ *
+ * @param {number} volFrac - Volume fraction 0–1 (this edge / max edge volume)
+ * @param {'heatmap'|'normal'} mode
+ * @returns {{color:string, highlight:string, hover:string}}
+ */
+function edgeColorForMode(volFrac, mode) {
+  volFrac = clamp(volFrac, 0, 1);
+  if (mode === 'heatmap') {
+    // Heatmap: dim blue-grey → bright red, opacity also scales
+    const alpha = Math.round(clamp(0.25 + volFrac * 0.75, 0, 1) * 255).toString(16).padStart(2,'0');
+    const col   = lerpColor('#4b5563', '#ef4444', volFrac);   // grey → red
+    return { color: col + alpha, highlight:'#ef4444', hover:'#f87171' };
+  } else {
+    // Normal: dim amber → bright amber
+    const col = lerpColor('#78350f', '#f59e0b', volFrac);
+    return { color: col, highlight:'#fbbf24', hover:'#fde68a' };
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   setGraphMode — THE MAIN TOGGLE FUNCTION
+   Switches between 'normal' and 'heatmap' modes by batch-updating the
+   existing vis.DataSet objects (no graph rebuild, no physics restart).
+────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Switch the graph between Normal and Heatmap rendering modes.
+ *
+ * Guards against:
+ *   • No graph rendered yet (visNodeDataset is null)
+ *   • No analysis result (analysisResult is null)
+ *   • Destroyed/stale network after reset
+ *
+ * @param {'normal'|'heatmap'} mode
+ */
+function setGraphMode(mode) {
+  // ── 1. Persist mode and update button states ───────────────────────
+  currentGraphMode = mode;
+  document.getElementById('btnNormal').classList.toggle('active',  mode === 'normal');
+  document.getElementById('btnHeatmap').classList.toggle('active', mode === 'heatmap');
+
+  // ── 2. Update CSS chrome (overlay + container background) ──────────
+  document.getElementById('heatmapOverlay').classList.toggle('visible', mode === 'heatmap');
+  document.getElementById('graphContainer').style.background = mode === 'heatmap'
+    ? 'radial-gradient(ellipse at 30% 30%, rgba(239,68,68,0.07) 0%, transparent 60%), ' +
+      'radial-gradient(ellipse at 70% 70%, rgba(16,185,129,0.05) 0%, transparent 60%), ' +
+      'rgba(0,5,15,0.6)'
+    : 'rgba(0, 5, 15, 0.6)';
+
+  // ── 3. Defensive guard — bail if no graph data exists ─────────────
+  //    This fires cleanly during resetAll() because AppState is replaced
+  //    before setGraphMode is called, so both datasets are null.
+  const nodeDS = AppState.visNodeDataset;
+  const edgeDS = AppState.visEdgeDataset;
+  const r      = AppState.analysisResult;
+
+  if (!AppState.networkInstance || !nodeDS || !edgeDS || !r) return;
+
+  // ── 4. Build lookup maps ───────────────────────────────────────────
+  const rawScoreMap  = new Map(r.accountScores.map(a => [a.account_id, a.risk_score]));
+  const normScoreMap = buildNormalizedScoreMap(r.accountScores);  // relative spread
+  const sccSet       = new Set(r.fraudRings.flatMap(ring => ring.members));
+  const anomSet      = new Set([...r.accountAnomalies.keys()]);
+  const edgeVolMap   = AppState.edgeVolumeMap;  // stored during renderGraph (see below)
+  const maxVol       = AppState.maxEdgeVolume || 1;
+
+  // ── 5. Build node update batch ─────────────────────────────────────
+  const nodeUpdates = r.nodes.map(id => {
+    // Safe score lookup with explicit undefined check
+    const rawScore  = rawScoreMap.has(id)  ? rawScoreMap.get(id)  : 0;
+    const normScore = normScoreMap.has(id) ? normScoreMap.get(id) : 0;
+
+    if (mode === 'heatmap') {
+      /* ── HEATMAP: continuous perceptual color per node ── */
+
+      // Border color: uses normalized score so palette spans full dataset range
+      const borderColor = riskScoreToColor(rawScore, normScore);
+
+      // Background: dark tint of the border color (NOT near-black — see borderToBg)
+      const bgColor = borderToBg(borderColor, 0.22);
+
+      // Size: normalized scale between 12px (safe) and 34px (max risk)
+      // Using normalized score ensures size spread even in narrow score bands
+      const nodeSize = Math.round(12 + normScore * 22);
+
+      // Border thickness: 1px (safe) → 5px (max risk)
+      const bWidth = Math.round(1 + normScore * 4);
+
+      return {
+        id,
+        color: {
+          background: bgColor,
+          border:     borderColor,
+          highlight:  { background: lerpColor(bgColor, borderColor, 0.5), border: '#ffffff' },
+          hover:      { background: bgColor, border: borderColor },
+        },
+        size:        nodeSize,
+        borderWidth: bWidth,
+      };
+
+    } else {
+      /* ── NORMAL: category-based colors ── */
+      let bg, border;
+      if      (sccSet.has(id))  { bg = '#2d0b0b'; border = '#ef4444'; }
+      else if (anomSet.has(id)) { bg = '#2d1c08'; border = '#f59e0b'; }
+      else                      { bg = '#0a2d1c'; border = '#10b981'; }
+
+      return {
+        id,
+        color: {
+          background: bg,
+          border:     border,
+          highlight:  { background: border, border: '#ffffff' },
+          hover:      { background: bg,     border: border    },
+        },
+        size:        14 + Math.round(rawScore / 10),
+        borderWidth: sccSet.has(id) ? 3 : 2,
+      };
+    }
+  });
+
+  // ── 6. Build edge update batch ─────────────────────────────────────
+  //    edgeVolMap is a Map<edgeId, volumeFraction> built during renderGraph.
+  //    Each edge retains its original width; only color changes per mode.
+  const edgeUpdates = edgeDS.get().map(e => {
+    const volFrac = (edgeVolMap && edgeVolMap.has(e.id)) ? edgeVolMap.get(e.id) : 0.5;
+    const ec      = edgeColorForMode(volFrac, mode);
+    return { id: e.id, color: ec };
+  });
+
+  // ── 7. Apply batch updates — single repaint, no layout disruption ──
+  nodeDS.update(nodeUpdates);
+  edgeDS.update(edgeUpdates);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FILE INPUT  —  event wiring
+═══════════════════════════════════════════════════════════════════════ */
+function clearFileInput() {
+  DOM.fileInput.value = null;
+}
+
+DOM.fileInput.addEventListener('change', function onFileChange() {
+  const f = DOM.fileInput.files[0];
+  if (f) handleFile(f);
+});
+
+DOM.uploadZone.addEventListener('dragover', function(e) {
+  e.preventDefault();
+  DOM.uploadZone.classList.add('drag-over');
+});
+DOM.uploadZone.addEventListener('dragleave', function() {
+  DOM.uploadZone.classList.remove('drag-over');
+});
+DOM.uploadZone.addEventListener('drop', function(e) {
+  e.preventDefault();
+  DOM.uploadZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+/**
+ * Entry point for file upload — shows loading spinner during processing.
+ */
+function handleFile(file) {
+  if (AppState.isParsing) return;
+
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    showError('Invalid file type. Please upload a .csv file.');
+    return;
+  }
+
+  hideError();
+  AppState.isParsing = true;
+  AppState.processingStart = performance.now();  // start timer
+
+  // Show loading spinner
+  showLoading(true);
+
+  Papa.parse(file, {
+    header:          true,
+    skipEmptyLines:  true,
+    dynamicTyping:   false,
+    transformHeader: h => h.trim().toLowerCase(),
+    complete(result) {
+      AppState.isParsing = false;
+      if (result.errors.length && result.data.length === 0) {
+        showLoading(false);
+        showError('CSV parse error: ' + result.errors[0].message);
+        return;
+      }
+      processData(result.data);
+    },
+    error(err) {
+      AppState.isParsing = false;
+      showLoading(false);
+      showError('Failed to read file: ' + err.message);
+    },
+  });
+}
+
+/** Show or hide the loading spinner overlay */
+function showLoading(visible) {
+  document.getElementById('loadingOverlay').classList.toggle('visible', visible);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2. DATA VALIDATION & NORMALISATION
+═══════════════════════════════════════════════════════════════════════ */
+const REQUIRED = ['transaction_id','sender_id','receiver_id','amount','timestamp'];
+
+function processData(rows) {
+  if (AppState.analysisResult !== null) return;
+
+  if (!rows.length) { showLoading(false); showError('No data rows found.'); return; }
+
+  const keys    = Object.keys(rows[0]);
+  const missing = REQUIRED.filter(c => !keys.includes(c));
+  if (missing.length) { showLoading(false); showError('Missing columns: ' + missing.join(', ')); return; }
+
+  const transactions = [];
+  const parseErrors  = [];
+
+  rows.forEach((r, i) => {
+    const amount = parseFloat(r.amount);
+    const ts     = parseTimestamp(r.timestamp ? r.timestamp.trim() : '');
+
+    if (isNaN(amount))              { parseErrors.push('Row ' + (i+2) + ': invalid amount "'    + r.amount    + '"'); return; }
+    if (ts === null)                { parseErrors.push('Row ' + (i+2) + ': unparseable timestamp "' + r.timestamp + '"'); return; }
+    if (!r.sender_id || !r.receiver_id) { parseErrors.push('Row ' + (i+2) + ': missing sender/receiver'); return; }
+
+    transactions.push({
+      transaction_id: String(r.transaction_id).trim(),
+      sender_id:      String(r.sender_id).trim(),
+      receiver_id:    String(r.receiver_id).trim(),
+      amount,
+      timestamp:      String(r.timestamp).trim(),
+      ts_ms:          ts,
+    });
+  });
+
+  if (parseErrors.length > 0 && transactions.length === 0) {
+    showLoading(false); showError(parseErrors[0]); return;
+  }
+  if (transactions.length === 0) { showLoading(false); showError('No valid rows after validation.'); return; }
+
+  AppState.allTransactions = transactions;
+  AppState.analysisResult  = runAnalysis(transactions);
+
+  // Calculate processing time
+  const elapsed = performance.now() - AppState.processingStart;
+  const timeStr = elapsed < 1000
+    ? Math.round(elapsed) + 'ms'
+    : (elapsed / 1000).toFixed(2) + 's';
+
+  renderAll(transactions, AppState.analysisResult, timeStr);
+
+  // Hide loading, show results
+  showLoading(false);
+  uploadZone.style.display = 'none';
+  hintText.style.display   = 'none';
+  RESULT_SECTIONS.forEach(el => el.classList.add('visible'));
+  // Show dashboard grid
+  document.getElementById('dashboardGrid').classList.add('visible');
+}
+
+function parseTimestamp(s) {
+  if (!s) return null;
+  const normalised = s.replace(' ', 'T');
+  const d = new Date(normalised);
+  if (!isNaN(d.getTime())) return d.getTime();
+  const d2 = new Date(s);
+  return isNaN(d2.getTime()) ? null : d2.getTime();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3. CORE ANALYSIS PIPELINE
+   Complexity: O((V+E) + k·E + T log T)
+═══════════════════════════════════════════════════════════════════════ */
+function runAnalysis(txns) {
+
+  /* ── 3a. Build O(E) graph structures ─── */
+  const adj    = new Map();
+  const radj   = new Map();
+  const stats  = new Map();
+
+  function ensureNode(id) {
+    if (!adj.has(id))   adj.set(id, new Set());
+    if (!radj.has(id))  radj.set(id, new Set());
+    if (!stats.has(id)) stats.set(id, {
+      sentTxns: [], recvTxns: [],
+      totalSent: 0, totalRecv: 0,
+      outNeighbours: new Set(), inNeighbours: new Set()
+    });
+  }
+
+  txns.forEach(t => {
+    ensureNode(t.sender_id);
+    ensureNode(t.receiver_id);
+    adj.get(t.sender_id).add(t.receiver_id);
+    radj.get(t.receiver_id).add(t.sender_id);
+    const s = stats.get(t.sender_id);
+    s.sentTxns.push(t); s.totalSent += t.amount; s.outNeighbours.add(t.receiver_id);
+    const r = stats.get(t.receiver_id);
+    r.recvTxns.push(t); r.totalRecv += t.amount; r.inNeighbours.add(t.sender_id);
+  });
+
+  const nodes = [...adj.keys()];
+  const V     = nodes.length;
+  const E     = txns.length;
+
+  /* ── 3b. Tarjan's SCC — O(V + E) ─── */
+  const index_map   = new Map();
+  const lowlink_map = new Map();
+  const on_stack    = new Set();
+  const stack       = [];
+  const sccs        = [];
+  let   idx_ctr     = 0;
+
+  function strongConnect(v) {
+    index_map.set(v, idx_ctr);
+    lowlink_map.set(v, idx_ctr);
+    idx_ctr++;
+    stack.push(v);
+    on_stack.add(v);
+    for (const w of (adj.get(v) || [])) {
+      if (!index_map.has(w)) {
+        strongConnect(w);
+        lowlink_map.set(v, Math.min(lowlink_map.get(v), lowlink_map.get(w)));
+      } else if (on_stack.has(w)) {
+        lowlink_map.set(v, Math.min(lowlink_map.get(v), index_map.get(w)));
+      }
+    }
+    if (lowlink_map.get(v) === index_map.get(v)) {
+      const scc = [];
+      let w;
+      do { w = stack.pop(); on_stack.delete(w); scc.push(w); } while (w !== v);
+      sccs.push(scc);
+    }
+  }
+
+  nodes.forEach(n => { if (!index_map.has(n)) strongConnect(n); });
+
+  const fraudRings = sccs
+    .filter(scc => scc.length >= 3)
+    .map((members, i) => {
+      const ringId      = 'RING_' + String(i + 1).padStart(3, '0');
+      const memberSet   = new Set(members);
+      const internalTxns = txns.filter(t =>
+        memberSet.has(t.sender_id) && memberSet.has(t.receiver_id)
+      );
+      const totalVolume  = internalTxns.reduce((s, t) => s + t.amount, 0);
+      const internalEdges = new Set();
+      internalTxns.forEach(t => internalEdges.add(t.sender_id + '→' + t.receiver_id));
+      const density = members.length > 1
+        ? internalEdges.size / (members.length * (members.length - 1))
+        : 0;
+      return {
+        ring_id: ringId, members, size: members.length,
+        total_volume: round2(totalVolume), txn_count: internalTxns.length,
+        density: round2(density), internalTxns
+      };
+    });
+
+  const accountRings = new Map();
+  fraudRings.forEach(ring => {
+    ring.members.forEach(m => {
+      if (!accountRings.has(m)) accountRings.set(m, []);
+      accountRings.get(m).push(ring.ring_id);
+    });
+  });
+
+  /* ── 3c. Temporal Anomaly Detection — O(T log T) ─── */
+  const RAPID_WINDOW_MS = 30 * 60 * 1000;
+  const BURST_WINDOW_MS = 10 * 60 * 1000;
+  const BURST_THRESHOLD = 5;
+  const anomalies = [];
+  const sortedTxns = [...txns].sort((a, b) => a.ts_ms - b.ts_ms);
+  const txnsBySender = new Map();
+  sortedTxns.forEach(t => {
+    if (!txnsBySender.has(t.sender_id)) txnsBySender.set(t.sender_id, []);
+    txnsBySender.get(t.sender_id).push(t);
+  });
+
+  txnsBySender.forEach((sent, accountId) => {
+    let left = 0;
+    for (let right = 0; right < sent.length; right++) {
+      while (sent[right].ts_ms - sent[left].ts_ms > BURST_WINDOW_MS) left++;
+      const windowSize = right - left + 1;
+      if (windowSize >= BURST_THRESHOLD) {
+        anomalies.push({
+          account_id: accountId, type: 'BURST',
+          detail: windowSize + ' txns in ' + Math.round((sent[right].ts_ms - sent[left].ts_ms) / 60000) + ' min',
+          risk_pts: 15
+        });
+        break;
+      }
+    }
+  });
+
+  fraudRings.forEach(ring => {
+    const ringTxns = [...ring.internalTxns].sort((a,b) => a.ts_ms - b.ts_ms);
+    const involved = new Set();
+    for (let i = 0; i < ringTxns.length - 1; i++) {
+      for (let j = i + 1; j < ringTxns.length; j++) {
+        if (ringTxns[j].ts_ms - ringTxns[i].ts_ms > RAPID_WINDOW_MS) break;
+        if (ringTxns[i].receiver_id === ringTxns[j].sender_id) {
+          involved.add(ringTxns[i].sender_id);
+          involved.add(ringTxns[j].receiver_id);
+        }
+      }
+    }
+    involved.forEach(acc => {
+      anomalies.push({ account_id: acc, type: 'RAPID_CYCLE',
+        detail: 'Circular flow detected within 30 min in ' + ring.ring_id, risk_pts: 20 });
+    });
+    const amountCount = new Map();
+    ringTxns.forEach(t => {
+      const k = t.amount.toFixed(2);
+      amountCount.set(k, (amountCount.get(k) || 0) + 1);
+    });
+    amountCount.forEach((count, amount) => {
+      if (count >= 2) {
+        ring.members.forEach(acc => {
+          anomalies.push({ account_id: acc, type: 'AMOUNT_LOOP',
+            detail: '$' + amount + ' repeated ' + count + 'x in ' + ring.ring_id, risk_pts: 10 });
+        });
+      }
+    });
+  });
+
+  const anomalyMap = new Map();
+  anomalies.forEach(a => {
+    const key = a.account_id + '|' + a.type;
+    if (!anomalyMap.has(key) || anomalyMap.get(key).risk_pts < a.risk_pts) anomalyMap.set(key, a);
+  });
+  const dedupedAnomalies = [...anomalyMap.values()];
+  const accountAnomalies = new Map();
+  dedupedAnomalies.forEach(a => {
+    if (!accountAnomalies.has(a.account_id)) accountAnomalies.set(a.account_id, []);
+    accountAnomalies.get(a.account_id).push(a);
+  });
+
+  /* ── 3d. Graph Metrics ─── */
+  const k      = Math.min(V, 50);
+  const pivots = shuffleSample(nodes, k);
+  const betweenness = new Map(nodes.map(n => [n, 0]));
+
+  pivots.forEach(source => {
+    const sigma = new Map([[source, 1]]);
+    const dist  = new Map([[source, 0]]);
+    const pred  = new Map(nodes.map(n => [n, []]));
+    const queue = [source];
+    const stack_b = [];
+    let qi = 0;
+    while (qi < queue.length) {
+      const v = queue[qi++];
+      stack_b.push(v);
+      for (const w of (adj.get(v) || [])) {
+        if (!dist.has(w)) { dist.set(w, dist.get(v) + 1); queue.push(w); sigma.set(w, 0); }
+        if (dist.get(w) === dist.get(v) + 1) {
+          sigma.set(w, (sigma.get(w) || 0) + (sigma.get(v) || 0));
+          pred.get(w).push(v);
+        }
+      }
+    }
+    const delta = new Map(nodes.map(n => [n, 0]));
+    while (stack_b.length) {
+      const w = stack_b.pop();
+      for (const v of pred.get(w)) {
+        const contrib = ((sigma.get(v) || 0) / (sigma.get(w) || 1)) * (1 + delta.get(w));
+        delta.set(v, delta.get(v) + contrib);
+      }
+      if (w !== source) betweenness.set(w, betweenness.get(w) + delta.get(w));
+    }
+  });
+
+  const maxBetweenness = Math.max(...betweenness.values()) || 1;
+  const normBetweenness = new Map([...betweenness].map(([k,v]) => [k, v / maxBetweenness]));
+
+  /* ── 3e. Volume Z-Score — O(V) ─── */
+  const sentAmounts = nodes.map(id => stats.get(id).totalSent);
+  const muSent      = mean(sentAmounts);
+  const sdSent      = stddev(sentAmounts, muSent);
+  const volumeZScore = new Map(nodes.map(id => {
+    const z = sdSent > 0 ? (stats.get(id).totalSent - muSent) / sdSent : 0;
+    return [id, z];
+  }));
+
+  /* ── 3f. Composite Risk Scoring — O(V) ─── */
+  const WEIGHTS = { scc:0.30, volume:0.20, between:0.15, temporal:0.15, fan_out:0.10, fan_in:0.10 };
+  const maxDegree = Math.max(1, V - 1);
+  const MAX_TEMPORAL_PTS = 45;
+
+  const accountScores = nodes.map(id => {
+    const st = stats.get(id);
+    const inRing = accountRings.has(id);
+    const sig_scc      = inRing ? 1.0 : 0.0;
+    const z            = volumeZScore.get(id);
+    const sig_volume   = Math.min(1.0, Math.max(0, (z - 0) / 4));
+    const sig_between  = normBetweenness.get(id) || 0;
+    const anomPts      = (accountAnomalies.get(id) || []).reduce((s,a) => s+a.risk_pts, 0);
+    const sig_temporal = Math.min(1.0, anomPts / MAX_TEMPORAL_PTS);
+    const sig_fan_out  = st.outNeighbours.size / maxDegree;
+    const sig_fan_in   = st.inNeighbours.size  / maxDegree;
+    const composite =
+      WEIGHTS.scc      * sig_scc     +
+      WEIGHTS.volume   * sig_volume  +
+      WEIGHTS.between  * sig_between +
+      WEIGHTS.temporal * sig_temporal+
+      WEIGHTS.fan_out  * sig_fan_out +
+      WEIGHTS.fan_in   * sig_fan_in;
+    const risk_score = Math.min(100, Math.round(composite * 100));
+    return {
+      account_id: id, risk_score,
+      signals: {
+        scc_member: inRing, scc_rings: accountRings.get(id) || [],
+        volume_zscore: round2(z), betweenness_norm: round2(sig_between),
+        temporal_pts: anomPts, out_degree: st.outNeighbours.size, in_degree: st.inNeighbours.size,
+        total_sent: round2(st.totalSent), total_received: round2(st.totalRecv),
+        txn_count: st.sentTxns.length + st.recvTxns.length
+      },
+      raw: { sig_scc, sig_volume, sig_between, sig_temporal, sig_fan_out, sig_fan_in }
+    };
+  });
+
+  accountScores.sort((a,b) => b.risk_score - a.risk_score);
+
+  /* ── 3g. Network-level metrics ─── */
+  const avgOutDegree  = E / Math.max(1, V);
+  const graphDensity  = E / Math.max(1, V * (V - 1));
+  const sccSizes      = sccs.map(s => s.length);
+  const largestSCC    = Math.max(...sccSizes, 0);
+  const totalVolume   = txns.reduce((s,t) => s+t.amount, 0);
+  const networkSummary = {
+    total_accounts: V, total_edges: E,
+    avg_out_degree: round2(avgOutDegree), density: round4(graphDensity),
+    scc_count: sccs.length, fraud_ring_count: fraudRings.length,
+    largest_scc_size: largestSCC, total_volume: round2(totalVolume),
+    high_risk_count: accountScores.filter(a => a.risk_score >= 70).length,
+    med_risk_count:  accountScores.filter(a => a.risk_score >= 40 && a.risk_score < 70).length,
+    low_risk_count:  accountScores.filter(a => a.risk_score < 40).length
+  };
+
+  return {
+    nodes, adj, stats, fraudRings, accountRings, dedupedAnomalies,
+    accountAnomalies, accountScores, normBetweenness, volumeZScore, networkSummary
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4. RENDER — ALL UI SECTIONS
+═══════════════════════════════════════════════════════════════════════ */
+function renderAll(txns, r, timeStr) {
+  renderStats(r.networkSummary);
+  renderDashboard(r.networkSummary, timeStr);  // NEW: populate dashboard cards
+  renderTable(txns);
+  renderGraph(txns, r);
+  renderRings(r.fraudRings);
+  renderAnomalies(r.dedupedAnomalies);
+  renderAccountTable(r.accountScores, r);
+  renderNetworkSummary(r.networkSummary);
+}
+
+/* ── Stats bar (kept for JS compat) ─── */
+function renderStats(ns) {
+  document.getElementById('statCount').textContent    = ns.total_edges;
+  document.getElementById('statTotal').textContent    = '$' + fmt(ns.total_volume);
+  document.getElementById('statAccounts').textContent = ns.total_accounts;
+  document.getElementById('statRings').textContent    = ns.fraud_ring_count;
+  document.getElementById('statHigh').textContent     = ns.high_risk_count;
+}
+
+/* ── Dashboard cards (NEW) ─── */
+function renderDashboard(ns, timeStr) {
+  document.getElementById('dashAccounts').textContent   = ns.total_accounts;
+  document.getElementById('dashTxns').textContent       = ns.total_edges + ' transactions';
+  document.getElementById('dashRings').textContent      = ns.fraud_ring_count;
+  document.getElementById('dashSuspicious').textContent = ns.high_risk_count + ns.med_risk_count;
+  document.getElementById('dashHighRisk').textContent   = ns.high_risk_count + ' high risk';
+  document.getElementById('dashTime').textContent       = timeStr || '—';
+}
+
+/* ── Transaction table ─── */
+function renderTable(data) {
+  tableBody.innerHTML = '';
+  data.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="id-cell">' + (i+1)                   + '</td>' +
+      '<td class="id-cell">' + esc(row.transaction_id) + '</td>' +
+      '<td>'                 + esc(row.sender_id)       + '</td>' +
+      '<td>'                 + esc(row.receiver_id)     + '</td>' +
+      '<td class="amount">'  + '$' + fmt(row.amount)   + '</td>' +
+      '<td>'                 + esc(row.timestamp)       + '</td>';
+    tableBody.appendChild(tr);
+  });
+}
+
+/* ── Graph (vis.js) ─── */
+function renderGraph(txns, r) {
+  const { nodes, fraudRings, accountRings, accountAnomalies, accountScores } = r;
+  const scoreMap = new Map(accountScores.map(a => [a.account_id, a.risk_score]));
+  const sccSet   = new Set(fraudRings.flatMap(ring => ring.members));
+  const anomSet  = new Set([...accountAnomalies.keys()]);
+
+  // Updated colors to match new green/yellow/red risk scheme
+  const nodeColor = id => {
+    if (sccSet.has(id))   return { bg:'#2d0b0b', border:'#ef4444', hBg:'#ef4444', hBo:'#fff' };  // red = high risk
+    if (anomSet.has(id))  return { bg:'#2d1c08', border:'#f59e0b', hBg:'#f59e0b', hBo:'#fff' };  // yellow = medium
+    return                       { bg:'#0a2d1c', border:'#10b981', hBg:'#10b981', hBo:'#fff' };  // green = low
+  };
+
+  const visNodes = nodes.map(id => {
+    const score = scoreMap.get(id) || 0;
+    const c     = nodeColor(id);
+    return {
+      id, label: id,
+      shape: 'dot', size: 14 + Math.round(score / 10),
+      color: { background: c.bg, border: c.border,
+               highlight: { background: c.hBg, border: c.hBo },
+               hover:     { background: c.bg,  border: c.hBg  } },
+      font:        { color:'#e2e8f0', face:'DM Mono', size:12 },
+      borderWidth: sccSet.has(id) ? 3 : 2
+    };
+  });
+
+  const edgeMap = new Map();
+  txns.forEach(t => {
+    const key = t.sender_id + '||' + t.receiver_id;
+    if (!edgeMap.has(key)) edgeMap.set(key, { from: t.sender_id, to: t.receiver_id, count:0, total:0 });
+    const e = edgeMap.get(key); e.count++; e.total += t.amount;
+  });
+
+  const maxEdgeVol = Math.max(...[...edgeMap.values()].map(e => e.total), 1);
+
+  // Build volume-fraction map keyed by edge id (index) so setGraphMode() can
+  // produce per-edge colors without re-scanning transactions.
+  const edgeVolumeMap = new Map();
+  const edgeArray = [...edgeMap.values()];
+
+  const visEdges = edgeArray.map((e, i) => {
+    const volFrac = e.total / maxEdgeVol;
+    edgeVolumeMap.set(i, volFrac);
+    return {
+      id: i, from: e.from, to: e.to,
+      label: '$' + fmt(e.total) + (e.count > 1 ? ' ×' + e.count : ''),
+      arrows: { to: { enabled:true, scaleFactor:0.7 } },
+      // Initial color uses normal-mode amber scheme
+      color: edgeColorForMode(volFrac, 'normal'),
+      font:  { color:'#64748b', face:'DM Mono', size:10, align:'middle' },
+      width: 1 + 4 * volFrac,
+      smooth:{ type:'curvedCW', roundness:0.2 }
+    };
+  });
+
+  // Store edge volume data in AppState so setGraphMode() can re-color without rebuild
+  AppState.edgeVolumeMap  = edgeVolumeMap;
+  AppState.maxEdgeVolume  = maxEdgeVol;
+
+  if (AppState.networkInstance) AppState.networkInstance.destroy();
+
+  // Store DataSet refs so setGraphMode() can update colors without full rebuild
+  AppState.visNodeDataset = new vis.DataSet(visNodes);
+  AppState.visEdgeDataset = new vis.DataSet(visEdges);
+
+  AppState.networkInstance = new vis.Network(
+    document.getElementById('graphContainer'),
+    { nodes: AppState.visNodeDataset, edges: AppState.visEdgeDataset },
+    {
+      physics: {
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: { gravitationalConstant:-60, springLength:150, springConstant:0.08, damping:0.4 },
+        stabilization: { iterations:300 }
+      },
+      interaction: { hover:true, tooltipDelay:80 }
+    }
+  );
+
+  AppState.networkInstance.on('click', params => {
+    if (params.nodes.length > 0) showNodePanel(params.nodes[0], r);
+    else closePanel();
+  });
+}
+
+/* ── Fraud rings table ─── */
+function renderRings(fraudRings) {
+  const badge    = document.getElementById('ringBadge');
+  const subtitle = document.getElementById('ringSubtitle');
+  const wrap     = document.getElementById('ringTableWrap');
+  const tbody    = document.getElementById('ringTableBody');
+
+  if (!fraudRings.length) {
+    badge.textContent    = '✓ No fraud rings detected';
+    badge.className      = 'ring-badge none';
+    subtitle.textContent = 'Graph is acyclic at SCC level (all components size < 3).';
+    wrap.style.display   = 'none';
+    return;
+  }
+
+  badge.textContent    = fraudRings.length + ' fraud ring' + (fraudRings.length > 1 ? 's' : '') + ' detected';
+  badge.className      = 'ring-badge found';
+  subtitle.textContent = 'Strongly Connected Components with ≥ 3 members (Tarjan O(V+E)).';
+  wrap.style.display   = '';
+
+  tbody.innerHTML = '';
+  fraudRings.forEach(ring => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td style="color:var(--high);font-weight:600">' + esc(ring.ring_id)                             + '</td>' +
+      '<td>'                                             + ring.size                                      + '</td>' +
+      '<td style="max-width:280px;white-space:normal">' + ring.members.map(esc).join(', ')               + '</td>' +
+      '<td class="amount">'                              + '$' + fmt(ring.total_volume)                   + '</td>' +
+      '<td>'                                             + ring.txn_count                                 + '</td>' +
+      '<td style="color:var(--muted)">'                 + 'density: ' + ring.density                     + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+/* ── Temporal anomaly table ─── */
+function renderAnomalies(anomalies) {
+  const badges = document.getElementById('anomalyBadges');
+  const tbody  = document.getElementById('anomalyTableBody');
+
+  if (!anomalies.length) {
+    badges.innerHTML = '<span class="ring-badge none">✓ No temporal anomalies detected</span>';
+    document.getElementById('anomalyTableWrapper').style.display = 'none';
+    return;
+  }
+
+  const typeCounts = {};
+  anomalies.forEach(a => typeCounts[a.type] = (typeCounts[a.type]||0)+1);
+  badges.innerHTML = Object.entries(typeCounts)
+    .map(([type, cnt]) => `<span class="anomaly-flag">⚡ ${type} &nbsp;×${cnt}</span>`)
+    .join('');
+
+  tbody.innerHTML = '';
+  [...anomalies].sort((a,b) => b.risk_pts - a.risk_pts).forEach(a => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>'                              + esc(a.account_id) + '</td>' +
+      '<td style="color:var(--med)">'    + esc(a.type)       + '</td>' +
+      '<td style="white-space:normal">'  + esc(a.detail)     + '</td>' +
+      '<td style="color:var(--high)">'   + '+' + a.risk_pts  + ' pts</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+/* ── Account ranking table (with color-coded risk levels) ─── */
+function renderAccountTable(scores, r) {
+  const tbody = document.getElementById('accountTableBody');
+  tbody.innerHTML = '';
+
+  scores.forEach((a, i) => {
+    // Color-coded risk level: Green=Low, Yellow=Medium, Red=High
+    const riskClass = a.risk_score >= 70 ? 'risk-high' : a.risk_score >= 40 ? 'risk-med' : 'risk-low';
+    const rings  = a.signals.scc_rings.join(', ') || '—';
+    const flags  = (r.accountAnomalies.get(a.account_id)||[]).map(f => f.type).join(', ') || '—';
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="id-cell">'                  + (i+1)                                                            + '</td>' +
+      '<td style="font-weight:600">'           + esc(a.account_id)                                               + '</td>' +
+      '<td><span class="' + riskClass + '">'   + a.risk_score + '/100</span></td>'                               +
+      '<td style="color:var(--high)">'         + esc(rings)                                                      + '</td>' +
+      '<td>'                                   + a.signals.out_degree                                             + '</td>' +
+      '<td>'                                   + a.signals.in_degree                                              + '</td>' +
+      '<td style="color:var(--info)">'         + a.signals.betweenness_norm.toFixed(3)                           + '</td>' +
+      '<td style="color:var(--med)">'          + (a.signals.volume_zscore > 0 ? '+' : '') + a.signals.volume_zscore.toFixed(2) + '</td>' +
+      '<td style="color:var(--med);font-size:11px;white-space:normal">' + esc(flags)                             + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+/* ── Network summary cards ─── */
+function renderNetworkSummary(ns) {
+  const grid = document.getElementById('netGrid');
+  const cards = [
+    ['Accounts (V)',    ns.total_accounts],
+    ['Transactions (E)',ns.total_edges],
+    ['Avg Out-Degree',  ns.avg_out_degree],
+    ['Graph Density',   ns.density],
+    ['SCC Components',  ns.scc_count],
+    ['Fraud Rings',     ns.fraud_ring_count],
+    ['Largest SCC',     ns.largest_scc_size + ' nodes'],
+    ['Total Volume',    '$' + fmt(ns.total_volume)],
+    ['High Risk ≥70',   ns.high_risk_count],
+    ['Med Risk 40–69',  ns.med_risk_count],
+  ];
+  grid.innerHTML = cards.map(([label, value]) =>
+    `<div class="net-card">
+       <div class="stat-label">${esc(label)}</div>
+       <div class="stat-value" style="font-size:18px">${esc(String(value))}</div>
+     </div>`
+  ).join('');
+}
+
+/* ── Node info panel ─── */
+function showNodePanel(nodeId, r) {
+  const score = r.accountScores.find(a => a.account_id === nodeId);
+  if (!score) return;
+
+  const st = r.stats.get(nodeId);
+  const net = st.totalRecv - st.totalSent;
+
+  document.getElementById('nodeName').textContent = nodeId;
+
+  const s = score.risk_score;
+  const barEl = document.getElementById('npScoreBar');
+  barEl.style.width = s + '%';
+  barEl.style.background = s >= 70 ? 'var(--high)' : s >= 40 ? 'var(--med)' : 'var(--low)';
+  const scoreEl = document.getElementById('npScore');
+  scoreEl.textContent = s + ' / 100';
+  scoreEl.className   = 'node-stat-value ' + (s >= 70 ? 'score-hi' : s >= 40 ? 'score-med' : 'score-lo');
+
+  document.getElementById('npOut').textContent      = '$' + fmt(st.totalSent);
+  document.getElementById('npOutCount').textContent = st.sentTxns.length + ' txns sent to ' + st.outNeighbours.size + ' accounts';
+  document.getElementById('npIn').textContent       = '$' + fmt(st.totalRecv);
+  document.getElementById('npInCount').textContent  = st.recvTxns.length + ' txns from ' + st.inNeighbours.size + ' accounts';
+
+  const netEl = document.getElementById('npNet');
+  netEl.textContent = (net >= 0 ? '+' : '') + '$' + fmt(net);
+  netEl.className   = 'node-stat-value ' + (net >= 0 ? 'net-val-pos' : 'net-val-neg');
+
+  document.getElementById('npCentrality').innerHTML =
+    'Out-degree: <b>' + score.signals.out_degree + '</b> &nbsp; In-degree: <b>' + score.signals.in_degree + '</b><br/>' +
+    'Betweenness (norm): <b>' + score.signals.betweenness_norm.toFixed(3) + '</b><br/>' +
+    'Volume Z-score: <b>' + (score.signals.volume_zscore > 0 ? '+' : '') + score.signals.volume_zscore.toFixed(2) + '</b>';
+
+  const rings  = score.signals.scc_rings;
+  const ringRow = document.getElementById('npRingRow');
+  if (rings.length) {
+    document.getElementById('npRings').innerHTML = rings.map(id => '<span class="ring-pill">' + esc(id) + '</span>').join('');
+    ringRow.style.display = '';
+  } else {
+    ringRow.style.display = 'none';
+  }
+
+  const flags   = r.accountAnomalies.get(nodeId) || [];
+  const flagRow = document.getElementById('npFlagRow');
+  if (flags.length) {
+    document.getElementById('npFlags').innerHTML = flags.map(f => '<span class="flag-pill">⚡ ' + esc(f.type) + '</span>').join('');
+    flagRow.style.display = '';
+  } else {
+    flagRow.style.display = 'none';
+  }
+
+  document.getElementById('nodePanel').classList.add('visible');
+}
+
+function closePanel() {
+  DOM.nodePanel.classList.remove('visible');
+  if (AppState.networkInstance) {
+    try { AppState.networkInstance.unselectAll(); } catch (_) {}
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   5. JSON EXPORT — fraud_report.json
+═══════════════════════════════════════════════════════════════════════ */
+function buildFraudReport() {
+  const r    = AppState.analysisResult;
+  const txns = AppState.allTransactions;
+  if (!r) return null;
+
+  const suspicious_accounts = r.accountScores.map(a => ({
+    account_id:        a.account_id,
+    suspicion_score:   a.risk_score,
+    risk_tier:         a.risk_score >= 70 ? 'HIGH' : a.risk_score >= 40 ? 'MEDIUM' : 'LOW',
+    in_fraud_ring:     a.signals.scc_member,
+    fraud_ring_ids:    a.signals.scc_rings,
+    total_sent:        a.signals.total_sent,
+    total_received:    a.signals.total_received,
+    transaction_count: a.signals.txn_count,
+    out_degree:        a.signals.out_degree,
+    in_degree:         a.signals.in_degree,
+    betweenness_norm:  a.signals.betweenness_norm,
+    volume_zscore:     a.signals.volume_zscore,
+    temporal_risk_pts: a.signals.temporal_pts,
+    temporal_flags:    (r.accountAnomalies.get(a.account_id) || []).map(f => ({
+      type: f.type, detail: f.detail, risk_pts: f.risk_pts
+    })),
+    signal_breakdown: {
+      scc_signal:      round2(a.raw.sig_scc),
+      volume_signal:   round2(a.raw.sig_volume),
+      between_signal:  round2(a.raw.sig_between),
+      temporal_signal: round2(a.raw.sig_temporal),
+      fanout_signal:   round2(a.raw.sig_fan_out),
+      fanin_signal:    round2(a.raw.sig_fan_in)
+    }
+  }));
+
+  const fraud_rings = r.fraudRings.map(ring => ({
+    ring_id:             ring.ring_id,
+    size:                ring.size,
+    members:             ring.members,
+    total_amount_cycled: ring.total_volume,
+    transaction_count:   ring.txn_count,
+    internal_density:    ring.density,
+    temporal_anomalies:  r.dedupedAnomalies
+      .filter(a => ring.members.includes(a.account_id))
+      .map(a => ({ account: a.account_id, type: a.type, detail: a.detail }))
+  }));
+
+  const ns = r.networkSummary;
+  const network_summary = {
+    total_accounts:      ns.total_accounts,
+    total_transactions:  ns.total_edges,
+    total_volume:        ns.total_volume,
+    average_out_degree:  ns.avg_out_degree,
+    graph_density:       ns.density,
+    scc_components:      ns.scc_count,
+    fraud_rings_found:   ns.fraud_ring_count,
+    largest_scc_size:    ns.largest_scc_size,
+    high_risk_accounts:  ns.high_risk_count,
+    medium_risk_accounts:ns.med_risk_count,
+    low_risk_accounts:   ns.low_risk_count,
+    temporal_anomalies:  r.dedupedAnomalies.length,
+    generated_at:        new Date().toISOString()
+  };
+
+  const model_explanation = {
+    scoring_formula: 'composite_score = 0.30×scc + 0.20×volume_zscore + 0.15×betweenness + 0.15×temporal + 0.10×fan_out + 0.10×fan_in',
+    signal_weights: {
+      scc_membership:        '30% — Tarjan SCC fraud ring membership (binary, highest weight)',
+      volume_zscore:         '20% — Statistical outlier in sent volume (z-score > 2 = high)',
+      betweenness_centrality:'15% — Approx. Brandes BFS (k=50 pivots) — bridge node detection',
+      temporal_anomaly:      '15% — BURST / RAPID_CYCLE / AMOUNT_LOOP flags summed',
+      fan_out:               '10% — Unique receivers / (V-1) — layering behaviour',
+      fan_in:                '10% — Unique senders / (V-1) — aggregation / smurfing'
+    },
+    algorithms: {
+      ring_detection:        'Tarjan SCC O(V+E) — detects all strongly connected components, flags size≥3 as fraud rings',
+      temporal_analysis:     'Sliding window O(T log T) — burst, rapid-cycle, amount-loop detection',
+      betweenness_approx:    'Brandes-style BFS sampling O(k·E), k=min(V,50)',
+      volume_anomaly:        'Population z-score O(V)',
+      csv_parsing:           'PapaParse RFC-4180 — handles quoted fields, embedded commas, BOM'
+    },
+    risk_tiers: {
+      HIGH:   'score ≥ 70 — Immediate investigation recommended',
+      MEDIUM: 'score 40–69 — Enhanced monitoring required',
+      LOW:    'score < 40 — Standard monitoring'
+    }
+  };
+
+  return { suspicious_accounts, fraud_rings, network_summary, model_explanation };
+}
+
+function downloadJSON() {
+  const report = buildFraudReport();
+  if (!report) return;
+  const blob   = new Blob([JSON.stringify(report, null, 2)], { type:'application/json' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href = url; a.download = 'fraud_report.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESET LIFECYCLE
+═══════════════════════════════════════════════════════════════════════ */
+function resetAll() {
+  AppState.isParsing = false;
+
+  if (AppState.networkInstance) {
+    try { AppState.networkInstance.destroy(); } catch (_) {}
+  }
+  // Replace AppState atomically BEFORE any further code (including setGraphMode below).
+  // This ensures all dataset references are null when setGraphMode's guards run —
+  // no stale vis.DataSet objects can be accidentally written to.
+  AppState = createFreshState();
+
+  DOM.nodePanel.classList.remove('visible');
+
+  DOM.tableBody.innerHTML = '';
+  document.getElementById('ringTableBody').innerHTML    = '';
+  document.getElementById('anomalyTableBody').innerHTML = '';
+  document.getElementById('accountTableBody').innerHTML = '';
+  document.getElementById('anomalyBadges').innerHTML    = '';
+  document.getElementById('netGrid').innerHTML          = '';
+
+  RESULT_SECTIONS.forEach(function(el) { el.classList.remove('visible'); });
+  document.getElementById('dashboardGrid').classList.remove('visible');
+
+  DOM.uploadZone.style.display = '';
+  DOM.hintText.style.display   = '';
+
+  // Reset graph mode toggle
+  setGraphMode('normal');
+
+  clearFileInput();
+  hideError();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   7. UTILITY FUNCTIONS
+═══════════════════════════════════════════════════════════════════════ */
+function fmt(n) {
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function round2(n) { return Math.round(n * 100) / 100; }
+function round4(n) { return Math.round(n * 10000) / 10000; }
+function mean(arr) { return arr.length ? arr.reduce((s,v) => s+v, 0) / arr.length : 0; }
+function stddev(arr, mu) {
+  if (arr.length < 2) return 0;
+  const variance = arr.reduce((s,v) => s + (v-mu)**2, 0) / arr.length;
+  return Math.sqrt(variance);
+}
+function shuffleSample(arr, k) {
+  const a = [...arr];
+  for (let i = 0; i < Math.min(k, a.length); i++) {
+    const j = i + Math.floor(Math.random() * (a.length - i));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, k);
+}
+function showError(msg) {
+  errorText.textContent = msg;
+  errorMsg.classList.add('visible');
+  errorMsg.style.animation = 'none'; void errorMsg.offsetWidth; errorMsg.style.animation = '';
+}
+function hideError() { errorMsg.classList.remove('visible'); }
+</script>
+</body>
+</html>
